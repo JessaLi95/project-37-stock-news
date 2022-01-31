@@ -1,7 +1,6 @@
 import requests
 from twilio.rest import Client
-from twilio.http.http_client import TwilioHttpClient
-from datetime import date, timedelta
+from datetime import date
 from decouple import config
 
 STOCK = "TSLA"
@@ -19,16 +18,18 @@ parameter1 = {
 }
 response1 = requests.get(url_stock, params=parameter1)
 response1.raise_for_status()
-data = response1.json()
+data = response1.json()['Time Series (Daily)']
+data_list = [value for (key, value) in data.items()]
 today_date = str(date.today())
-y_date = str(date.today() - timedelta(days=1))
-by_date = str(date.today() - timedelta(days=2))
-y_price = float(data["Time Series (Daily)"][y_date]["4. close"])
-by_price = float(data["Time Series (Daily)"][by_date]["4. close"])
-percentage_change = round((by_price - y_price) / y_price, 3)
-if percentage_change < -0.05 or percentage_change > 0.05:
+y_date = data_list[0]
+by_date = data_list[1]
+y_price = float(y_date["4. close"])
+by_price = float(by_date["4. close"])
+price_diff = by_price - y_price
+percentage_change = round(abs(by_price - y_price) / by_price * 100, 1)
+if percentage_change > 5:
     send_news = True
-if percentage_change < 0:
+if price_diff > 0:
     price_increase = False
 
 url_news = "https://newsapi.org/v2/everything"
@@ -40,24 +41,21 @@ parameter2 = {
 }
 response2 = requests.get(url_news, params=parameter2)
 response2.raise_for_status()
-date2 = response2.json()
-news_1 = f'Title: {date2["articles"][0]["title"]}\nDescription: {date2["articles"][0]["description"]}\n'
-news_2 = f'Title: {date2["articles"][1]["title"]}\nDescription: {date2["articles"][1]["description"]}\n'
-news_3 = f'Title: {date2["articles"][2]["title"]}\nDescription: {date2["articles"][2]["description"]}\n'
-news = news_1 + news_2 + news_3
+articles = response2.json()["articles"]
+three_articles = articles[:3]
 if price_increase:
-    symbol = "TSLA: 🔺"
+    symbol = "🔺"
 else:
-    symbol = "TSLA: 🔻"
-SMS_messages = f"{symbol}{percentage_change * 100}%\n{news}"
+    symbol = "🔻"
+formatted_articles = [
+    f'{STOCK}: {symbol}{percentage_change}%\nHeadline: {item["title"]}\nDescription: {item["description"]}\n' for item
+    in three_articles]
 
 if send_news:
-    # proxy_client = TwilioHttpClient()
-    # proxy_client.session.proxies = {'https': os.environ['https_proxy']}
     client = Client(account_sid, auth_token)
-    message = client.messages \
-        .create(body=SMS_messages,
-                from_="+16076009148",
-                to="+447536128991"
-                )
-    print(message.status)
+    for send_message in formatted_articles:
+        message = client.messages.create(body=send_message,
+                                         from_="+16076009148",
+                                         to="+447536128991"
+                                         )
+        print(message.status)
